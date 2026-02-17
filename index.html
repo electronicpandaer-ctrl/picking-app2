@@ -1,1 +1,131 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>8桁照合スタンドアロン</title>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 0; background: #222; color: white; text-align: center; overflow: hidden; }
+        #video { width: 100%; height: 40vh; object-fit: cover; background: #000; }
+        .container { padding: 15px; }
+        .display-area { display: flex; justify-content: space-around; margin-bottom: 20px; }
+        .card { background: #333; padding: 10px; border-radius: 8px; width: 45%; border: 2px solid #555; }
+        .card.active { border-color: #007bff; box-shadow: 0 0 10px #007bff; }
+        .num { font-size: 1.5rem; font-weight: bold; color: #fff; display: block; margin-top: 5px; }
+        #msg { font-size: 1.2rem; font-weight: bold; height: 3em; display: flex; align-items: center; justify-content: center; border-radius: 10px; }
+        .status-wait { background: #444; }
+        .status-ok { background: #28a745; animation: blink 0.5s step-end infinite; }
+        .status-ng { background: #dc3545; }
+        @keyframes blink { 50% { opacity: 0.5; } }
+        button { padding: 15px 30px; font-size: 1rem; border-radius: 5px; border: none; background: #007bff; color: white; margin-top: 10px; }
+    </style>
+</head>
+<body>
 
+    <video id="video" autoplay playsinline></video>
+    
+    <div class="container">
+        <div id="msg" class="status-wait">スキャン準備中...</div>
+
+        <div class="display-area">
+            <div id="card-ticket" class="card active">
+                <small>1. チケット</small>
+                <span id="txt-ticket" class="num">----</span>
+            </div>
+            <div id="card-item" class="card">
+                <small>2. 物品</small>
+                <span id="txt-item" class="num">----</span>
+            </div>
+        </div>
+
+        <button onclick="reset()">リセット / 次の照合</button>
+        <p style="font-size: 0.8rem; color: #888;">※8桁の数字を枠内に捉えてください</p>
+    </div>
+
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const msg = document.getElementById('msg');
+        const txtTicket = document.getElementById('txt-ticket');
+        const txtItem = document.getElementById('txt-item');
+        
+        let ticketNum = null;
+        let isProcessing = false;
+
+        // カメラ起動
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+            .then(stream => { video.srcObject = stream; msg.innerText = "チケットをスキャンしてください"; })
+            .catch(err => { msg.innerText = "カメラを許可してください"; });
+
+        // OCR処理ループ
+        async function scan() {
+            if (isProcessing) return;
+            isProcessing = true;
+
+            const context = canvas.getContext('2d');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            context.drawImage(video, 0, 0);
+
+            // Tesseractで数字のみ認識（ホワイトリスト設定）
+            const result = await Tesseract.recognize(canvas, 'eng', {
+                tessedit_char_whitelist: '0123456789'
+            });
+
+            const found = result.data.text.match(/\d{8}/); // 8桁の連続数字を探す
+
+            if (found) {
+                const val = found[0];
+                if (!ticketNum) {
+                    // STEP1: チケット登録
+                    ticketNum = val;
+                    txtTicket.innerText = val;
+                    document.getElementById('card-ticket').classList.remove('active');
+                    document.getElementById('card-item').classList.add('active');
+                    msg.innerText = "物品をスキャンしてください";
+                    msg.className = "status-wait";
+                    vibrate(100);
+                } else if (val !== ticketNum && txtItem.innerText === "----") {
+                    // STEP2: 物品照合
+                    txtItem.innerText = val;
+                    checkMatch(val);
+                }
+            }
+            
+            isProcessing = false;
+        }
+
+        function checkMatch(itemNum) {
+            if (ticketNum === itemNum) {
+                msg.innerText = "【一致】OKです！";
+                msg.className = "status-ok";
+                vibrate([200, 100, 200]);
+            } else {
+                msg.innerText = "【不一致】番号が違います！";
+                msg.className = "status-ng";
+                vibrate(500);
+            }
+        }
+
+        function reset() {
+            ticketNum = null;
+            txtTicket.innerText = "----";
+            txtItem.innerText = "----";
+            msg.innerText = "チケットをスキャンしてください";
+            msg.className = "status-wait";
+            document.getElementById('card-ticket').classList.add('active');
+            document.getElementById('card-item').classList.remove('active');
+        }
+
+        function vibrate(ms) {
+            if (navigator.vibrate) navigator.vibrate(ms);
+        }
+
+        // 1秒ごとにスキャン実行
+        setInterval(scan, 1000);
+    </script>
+</body>
+</html>
